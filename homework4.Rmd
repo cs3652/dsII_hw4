@@ -1,0 +1,245 @@
+---
+title: "ds2 Homework 4"
+author: "Chirag Shah"
+date: '2019-04-20'
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(lasso2)
+library(ISLR)
+library(caret)
+library(rpart)
+library(rpart.plot)
+library(party)
+library(partykit)
+library(randomForest)
+library(ranger)
+library(gbm)
+library(plotmo)
+library(pdp)
+library(lime)
+```
+
+Part 1a
+
+```{r}
+seed = 1
+data("Prostate")
+ctrl <- trainControl(method = "cv")
+```
+
+Fitting a regression tree with lpsa as the response and the other variables as predictors.
+  
+Is this the same as the tree size obtained using
+the 1 SE rule?
+
+```{r}
+set.seed(seed)
+
+lpsatree <- rpart(formula = lpsa ~., data = Prostate,
+                   control = rpart.control(cp = 0.001))
+rpart.plot(lpsatree)
+
+cpTable <- printcp(lpsatree)
+plotcp(lpsatree)
+
+minErr <- which.min(cpTable[,4])
+```
+
+Using cross-validation, the optimal tree size is 8. 
+
+```{r}
+#using the 1 SE rule
+
+cpTable[cpTable[,4] < cpTable[minErr,4] + cpTable[minErr,5], 2][1] + 1 
+```
+
+The tree size obtained using the 1 SE rule is 4 which is different than cross validation. 
+
+Part 1b 
+
+```{r}
+treeb <- prune(lpsatree, cp = cpTable[cpTable[,4] < cpTable[minErr,4] + cpTable[minErr,5], 1][1])
+rpart.plot(treeb)
+```
+
+I am selecting the terminal noed for when lcavol is not less than 2.5. The mean lpsa for observations greater than 2.5 is 3.8. 22% of the observations are in this terminal node. 
+
+Part 1c
+
+```{r}
+bagging.grid <- expand.grid(mtry = 8, 
+                       splitrule = "variance",
+                       min.node.size = 1:20) 
+
+set.seed(1)
+
+bagging <- train(lpsa~., Prostate, 
+                method = "ranger",
+                tuneGrid = bagging.grid,
+                trControl = ctrl,
+                importance = 'permutation')
+
+ggplot(bagging, highlight = TRUE)
+
+barplot(sort(ranger::importance(bagging$finalModel), decreasing = FALSE), 
+        las = 2, horiz = TRUE, cex.names = 0.7,
+        col = colorRampPalette(colors = c("darkred","white","darkblue"))(19))
+
+bagging$results[which.min(bagging$results[,5]),]
+```
+
+The variable importance from highest to lowest is lcavol, lweight, svi, pgg45, gleason, lbph, lcp, and age. 
+
+Part 1d
+
+```{r}
+rf.grid <- expand.grid(mtry = 1:7, 
+                       splitrule = "variance",
+                       min.node.size = 1:20) 
+
+set.seed(1)
+
+rf.fit <- train(lpsa~., Prostate, 
+                method = "ranger",
+                tuneGrid = rf.grid,
+                trControl = ctrl,
+                importance = 'permutation')
+
+ggplot(rf.fit, highlight = TRUE)
+
+barplot(sort(ranger::importance(rf.fit$finalModel), decreasing = FALSE), 
+        las = 2, horiz = TRUE, cex.names = 0.7,
+        col = colorRampPalette(colors = c("darkred","white","darkblue"))(19))
+
+rf.fit$results[which.min(rf.fit$results[,5]),]
+```
+
+The variable importance from highest to lowest is lcavol, svi, lweight, lcp, pgg45, gleason, lbph, and age. 
+
+Part 1e
+
+```{r}
+gbm.grid <- expand.grid(n.trees = c(2000,3000,5000),
+                        interaction.depth = 2:10, 
+                        shrinkage = c(0.01, 0.001,0.003,0.005),
+                        n.minobsinnode = 1)
+
+set.seed(1)
+
+gbm.fit <- train(lpsa ~., Prostate, 
+                 method = "gbm",
+                 tuneGrid = gbm.grid,
+                 verbose = FALSE,
+                 trControl = ctrl)
+
+ggplot(gbm.fit, highlight = TRUE)
+
+summary(gbm.fit$finalModel, las = 2, cBars = 19, cex.names = 0.6)
+```
+
+The variable importance from highest to lowest is lcavol, lweight, svi, lcp, age, pgg45, lbph, and gleason. 
+
+Part 1f
+
+```{r}
+resamp = resamples(list(rf = rf.fit, gbm = gbm.fit, bagging = bagging))
+summary(resamp)
+```
+
+Based on the RMSE, I will select the GBM model as it has the lowest RMSE. 
+
+Part 2a
+
+```{r}
+data("OJ")
+
+set.seed(1)
+
+rowTrain = createDataPartition(y = OJ$Purchase,
+                                p = 0.747,
+                                list = FALSE)
+
+ctrl <- trainControl(method = "repeatedcv")
+```
+
+```{r}
+set.seed(1)
+
+rpart.class <- train(Purchase ~., OJ, 
+                   subset = rowTrain,
+                   method = "rpart",
+                   tuneGrid = data.frame(cp = exp(seq(-7,-2, len = 50))),
+                   trControl = ctrl,
+                   metric = "Accuracy")
+
+ggplot(rpart.class, highlight = T)
+rpart.plot(rpart.class$finalModel)
+```
+
+```{r}
+rpart.pred <- predict(rpart.class, newdata = OJ[-rowTrain,])
+
+error_rate <- mean(rpart.pred != OJ$Purchase[-rowTrain])
+```
+
+The test classification error rate is 0.185.
+
+Part 2b
+
+```{r}
+rf.grid <- expand.grid(mtry = 1:10,
+                       splitrule = "gini",
+                       min.node.size = 1:6)
+
+set.seed(1)
+
+rf.class <- train(Purchase ~., OJ, 
+                subset = rowTrain,
+                method = "ranger",
+                tuneGrid = rf.grid,
+                metric = "Accuracy",
+                trControl = ctrl,
+                importance = 'permutation')
+
+ggplot(rf.class, highlight = TRUE)
+
+rf.pred = predict(rf.class, newdata = OJ[-rowTrain,])
+
+error_rateb <- mean(rf.pred != OJ$Purchase[-rowTrain])
+```
+
+The test classification error rate is 0.189.
+
+Part 2c
+
+```{r}
+boosting.grid <- expand.grid(n.trees = c(2000,3000,4000),
+                        interaction.depth = 1:6,
+                        shrinkage = c(0.001,0.003,0.005),
+                        n.minobsinnode = 1)
+
+set.seed(1)
+
+boosting.fit <- train(Purchase ~., OJ, 
+                 subset = rowTrain, 
+                 tuneGrid = boosting.grid,
+                 trControl = ctrl,
+                 method = "gbm",
+                 distribution = "adaboost",
+                 metric = "Accuracy",
+                 verbose = FALSE)
+
+ggplot(boosting.fit, highlight = TRUE)
+
+gbm.pred = predict(boosting.fit, newdata = OJ[-rowTrain,])
+
+error_ratec <- mean(gbm.pred != OJ$Purchase[-rowTrain])
+```
+
+The test classification error rate is 0.155. 
