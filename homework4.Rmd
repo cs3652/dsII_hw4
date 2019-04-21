@@ -214,7 +214,7 @@ rf.pred = predict(rf.class, newdata = OJ[-rowTrain,])
 error_rateb <- mean(rf.pred != OJ$Purchase[-rowTrain])
 ```
 
-The test classification error rate is 0.189.
+The test error rate is 0.189.
 
 Part 2c
 
@@ -242,4 +242,4 @@ gbm.pred = predict(boosting.fit, newdata = OJ[-rowTrain,])
 error_ratec <- mean(gbm.pred != OJ$Purchase[-rowTrain])
 ```
 
-The test classification error rate is 0.155. 
+The test error rate is 0.155. 
